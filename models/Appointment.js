@@ -21,9 +21,19 @@ const appointmentSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'completed', 'cancelled'],
+    enum: ['pending', 'confirmed', 'checked-in', 'in-consultation', 'completed', 'cancelled'],
     default: 'pending'
   },
+  appointmentType: {
+    type: String,
+    enum: ['new', 'follow-up', 'emergency', 'lab-test'],
+    default: 'new'
+  },
+  checkedInTime: Date,
+  consultationStartTime: Date,
+  consultationEndTime: Date,
+  cancellationReason: String,
+  waitingNumber: Number,
   symptoms: String,
   notes: String,
   createdBy: {

@@ -6,7 +6,7 @@ import authMiddleware from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.post("/register", async (req, res) => {
+router.post("/register", async (req, res, next) => {
   try {
     const { name, email, password, role, phone, specialization } = req.body;
 
@@ -65,15 +65,11 @@ router.post("/register", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Registration error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
@@ -114,14 +110,13 @@ router.post("/login", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    next(error);
   }
 });
 
 // @desc    Get current logged in user
 // @route   GET /api/auth/me
-router.get("/me", authMiddleware, async (req, res) => {
+router.get("/me", authMiddleware, async (req, res, next) => {
   try {
     const user = await User.findById(req.user.userId).select("-password");
     if (!user) {
@@ -141,8 +136,7 @@ router.get("/me", authMiddleware, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Get /me error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    next(error);
   }
 });
 

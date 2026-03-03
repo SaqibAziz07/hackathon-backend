@@ -12,6 +12,7 @@ import authRoutes from "./routes/auth.js";
 import userRoutes from "./routes/users.js";
 import prescriptionRoutes from "./routes/prescriptions.js";
 import analyticsRoutes from "./routes/analytics.js";
+import adminRoutes from "./routes/admin.js";
 
 connectDB();
 
@@ -34,6 +35,7 @@ app.use("/api/appointments", appointmentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/prescriptions", prescriptionRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running 🚀");
@@ -41,6 +43,10 @@ app.get("/", (req, res) => {
 
 app.use("/api/entries", entryRoutes);
 app.use("/api/ai", aiRoutes);
+
+// Global Error Handler
+import errorMiddleware from "./middleware/errorMiddleware.js";
+app.use(errorMiddleware);
 
 const PORT = process.env.PORT || 5000;
 

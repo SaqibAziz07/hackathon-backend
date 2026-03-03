@@ -7,16 +7,13 @@ const router = express.Router();
 
 // @desc    Create new patient (Admin/Receptionist only)
 // @route   POST /api/patients
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, (req, res, next) => {
+  if (!['admin', 'receptionist'].includes(req.user.role)) {
+    return res.status(403).json({ success: false, message: "Only admin and receptionist can create patients" });
+  }
+  next();
+}, async (req, res, next) => {
   try {
-    // Check if user has permission
-    if (!['admin', 'receptionist'].includes(req.user.role)) {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Only admin and receptionist can create patients" 
-      });
-    }
-
     const patientData = {
       ...req.body,
       createdBy: req.user.userId
@@ -31,47 +28,62 @@ router.post("/", authMiddleware, async (req, res) => {
       patient
     });
   } catch (error) {
-    console.error("Create patient error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
-// @desc    Get all patients
+// @desc    Get all patients / Search patients
 // @route   GET /api/patients
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", authMiddleware, async (req, res, next) => {
   try {
-    let patients;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const { search, mrNumber, phone } = req.query;
+
+    let query = {};
     
-    // Different roles see different data
+    // Role-based restrictions
     if (req.user.role === 'patient') {
-      // Patients see only themselves
-      patients = await Patient.find({ _id: req.user.userId });
+      query = { _id: req.user.userId };
     } else {
-      // Admin, doctor, receptionist see all
-      patients = await Patient.find()
-        .populate('createdBy', 'name email');
+      // Search filters
+      if (search) {
+        query.name = { $regex: search, $options: 'i' };
+      }
+      if (mrNumber) {
+        query.mrNumber = mrNumber;
+      }
+      if (phone) {
+        query.contact = phone;
+      }
     }
+
+    const [patients, total] = await Promise.all([
+      Patient.find(query)
+        .populate('createdBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Patient.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       count: patients.length,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
       patients
     });
   } catch (error) {
-    console.error("Get patients error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Get single patient
 // @route   GET /api/patients/:id
-router.get("/:id", authMiddleware, async (req, res) => {
+router.get("/:id", authMiddleware, async (req, res, next) => {
   try {
     const patient = await Patient.findById(req.params.id)
       .populate('createdBy', 'name email');
@@ -96,17 +108,13 @@ router.get("/:id", authMiddleware, async (req, res) => {
       patient
     });
   } catch (error) {
-    console.error("Get patient error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Update patient
 // @route   PUT /api/patients/:id
-router.put("/:id", authMiddleware, async (req, res) => {
+router.put("/:id", authMiddleware, async (req, res, next) => {
   try {
     // Check permissions
     if (!['admin', 'receptionist'].includes(req.user.role)) {
@@ -135,26 +143,14 @@ router.put("/:id", authMiddleware, async (req, res) => {
       patient
     });
   } catch (error) {
-    console.error("Update patient error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Delete patient
 // @route   DELETE /api/patients/:id
-router.delete("/:id", authMiddleware, async (req, res) => {
+router.delete("/:id", authMiddleware, isAdmin, async (req, res, next) => {
   try {
-    // Only admin can delete
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Only admin can delete patients" 
-      });
-    }
-
     const patient = await Patient.findByIdAndDelete(req.params.id);
 
     if (!patient) {
@@ -169,21 +165,17 @@ router.delete("/:id", authMiddleware, async (req, res) => {
       message: "Patient deleted successfully"
     });
   } catch (error) {
-    console.error("Delete patient error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Get patient medical history
 // @route   GET /api/patients/:id/history
-router.get("/:id/history", authMiddleware, async (req, res) => {
+router.get("/:id/history", authMiddleware, async (req, res, next) => {
   try {
     const patientId = req.params.id;
     
-    // Get appointments
+    // Get models directly if not imported (Mongoose 6+)
     const Appointment = mongoose.model('Appointment');
     const Prescription = mongoose.model('Prescription');
     const DiagnosisLog = mongoose.model('DiagnosisLog');
@@ -209,11 +201,34 @@ router.get("/:id/history", authMiddleware, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Get patient history error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    next(error);
+  }
+});
+
+// @desc    Search patients by MR#, Name, or Phone (Receptionist/Doctor)
+// @route   GET /api/patients/search/quick
+router.get("/search/quick", authMiddleware, async (req, res, next) => {
+  try {
+    const { query } = req.query;
+    if (!query) {
+      return res.status(400).json({ success: false, message: "Search query is required" });
+    }
+
+    const patients = await Patient.find({
+      $or: [
+        { name: { $regex: query, $options: 'i' } },
+        { mrNumber: { $regex: query, $options: 'i' } },
+        { contact: { $regex: query, $options: 'i' } }
+      ]
+    }).limit(10);
+
+    res.json({
+      success: true,
+      count: patients.length,
+      patients
     });
+  } catch (error) {
+    next(error);
   }
 });
 

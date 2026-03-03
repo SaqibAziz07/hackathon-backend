@@ -1,12 +1,13 @@
 import express from "express";
 import User from "../models/User.js";
 import authMiddleware from "../middleware/auth.js";
+import { isAdmin } from "../middleware/roles.js";
 
 const router = express.Router();
 
 // @desc    Get all doctors
 // @route   GET /api/users/doctors
-router.get("/doctors", authMiddleware, async (req, res) => {
+router.get("/doctors", authMiddleware, async (req, res, next) => {
   try {
     const doctors = await User.find({ role: "doctor" })
       .select("name email specialization phone profileImage")
@@ -18,25 +19,14 @@ router.get("/doctors", authMiddleware, async (req, res) => {
       doctors
     });
   } catch (error) {
-    console.error("Get doctors error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Get all receptionists (admin only)
 // @route   GET /api/users/receptionists
-router.get("/receptionists", authMiddleware, async (req, res) => {
+router.get("/receptionists", authMiddleware, isAdmin, async (req, res, next) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Access denied. Admin only." 
-      });
-    }
-
     const receptionists = await User.find({ role: "receptionist" })
       .select("name email phone profileImage")
       .sort({ name: 1 });
@@ -47,17 +37,13 @@ router.get("/receptionists", authMiddleware, async (req, res) => {
       receptionists
     });
   } catch (error) {
-    console.error("Get receptionists error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Get single user by ID
 // @route   GET /api/users/:id
-router.get("/:id", authMiddleware, async (req, res) => {
+router.get("/:id", authMiddleware, async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id)
       .select("-password");
@@ -74,11 +60,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
       user
     });
   } catch (error) {
-    console.error("Get user error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 

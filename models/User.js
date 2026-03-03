@@ -20,8 +20,13 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'doctor', 'receptionist', 'patient'],
+    enum: ['admin', 'doctor', 'receptionist', 'patient', 'super-admin', 'manager'],
     required: true
+  },
+  status: {
+    type: String,
+    enum: ['active', 'blocked', 'pending'],
+    default: 'active'
   },
   specialization: {
     type: String,

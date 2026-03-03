@@ -5,19 +5,14 @@ import Patient from "../models/Patient.js";
 import authMiddleware from "../middleware/auth.js";
 import { generatePrescriptionPDF } from "../utils/pdfGenerator.js";
 
+import { isAdmin, isDoctor } from "../middleware/roles.js";
+
 const router = express.Router();
 
 // @desc    Create prescription (Doctor only)
 // @route   POST /api/prescriptions
-router.post("/", authMiddleware, async (req, res) => {
+router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
   try {
-    // Only doctors can create prescriptions
-    if (req.user.role !== 'doctor') {
-      return res.status(403).json({
-        success: false,
-        message: "Only doctors can create prescriptions"
-      });
-    }
 
     const { patientId, appointmentId, diagnosis, symptoms, medicines, tests, advice, followUpDate } = req.body;
 
@@ -70,6 +65,7 @@ router.post("/", authMiddleware, async (req, res) => {
       medicines: medicines || [],
       tests: tests || [],
       advice: advice || '',
+      aiSummary: aiSummary || '',
       followUpDate
     };
 
@@ -99,18 +95,18 @@ router.post("/", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Create prescription error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    next(error);
   }
 });
 
-// @desc    Get all prescriptions (role-based)
+// @desc    Get all prescriptions (role-based with pagination)
 // @route   GET /api/prescriptions
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", authMiddleware, async (req, res, next) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
     let query = {};
     
     // Role-based filtering
@@ -120,27 +116,32 @@ router.get("/", authMiddleware, async (req, res) => {
       const patient = await Patient.findOne({ email: req.user.email });
       if (patient) {
         query.patientId = patient._id;
+      } else {
+        return res.json({ success: true, count: 0, total: 0, page, pages: 0, prescriptions: [] });
       }
     }
-    // Admin sees all
 
-    const prescriptions = await Prescription.find(query)
-      .populate('patientId', 'name age gender contact')
-      .populate('doctorId', 'name specialization')
-      .sort({ createdAt: -1 });
+    const [prescriptions, total] = await Promise.all([
+      Prescription.find(query)
+        .populate('patientId', 'name age gender contact')
+        .populate('doctorId', 'name specialization')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      Prescription.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       count: prescriptions.length,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
       prescriptions
     });
 
   } catch (error) {
-    console.error("Get prescriptions error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    next(error);
   }
 });
 
@@ -166,25 +167,14 @@ router.get("/:id", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get prescription error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    next(error);
   }
 });
 
 // @desc    Update prescription (Doctor only)
 // @route   PUT /api/prescriptions/:id
-router.put("/:id", authMiddleware, async (req, res) => {
+router.put("/:id", authMiddleware, isDoctor, async (req, res, next) => {
   try {
-    if (req.user.role !== 'doctor') {
-      return res.status(403).json({
-        success: false,
-        message: "Only doctors can update prescriptions"
-      });
-    }
-
     const prescription = await Prescription.findById(req.params.id);
     
     if (!prescription) {
@@ -216,17 +206,13 @@ router.put("/:id", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Update prescription error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    next(error);
   }
 });
 
 // @desc    Delete prescription (Doctor/Admin only)
 // @route   DELETE /api/prescriptions/:id
-router.delete("/:id", authMiddleware, async (req, res) => {
+router.delete("/:id", authMiddleware, async (req, res, next) => {
   try {
     if (!['doctor', 'admin'].includes(req.user.role)) {
       return res.status(403).json({
@@ -260,11 +246,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Delete prescription error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    next(error);
   }
 });
 
@@ -296,11 +278,7 @@ router.get("/patient/:patientId", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get patient prescriptions error:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    next(error);
   }
 });
 

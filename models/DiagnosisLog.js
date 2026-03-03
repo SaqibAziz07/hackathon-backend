@@ -26,6 +26,7 @@ const diagnosisLogSchema = new mongoose.Schema({
     type: String,
     enum: ['low', 'medium', 'high']
   },
+  aiConfidence: Number,
   createdAt: {
     type: Date,
     default: Date.now

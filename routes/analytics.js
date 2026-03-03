@@ -11,7 +11,7 @@ const router = express.Router();
 
 // @desc    Admin Analytics Dashboard
 // @route   GET /api/analytics/admin
-router.get("/admin", authMiddleware, isAdmin, async (req, res) => {
+router.get("/admin", authMiddleware, isAdmin, async (req, res, next) => {
   try {
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -37,6 +37,53 @@ router.get("/admin", authMiddleware, isAdmin, async (req, res) => {
     // Simulated Revenue (e.g. $99 per Pro user)
     const simulatedRevenue = proUsers * 99;
 
+    // Aggregations for more detailed reports
+    const [
+      registrationTrends,
+      topDoctors,
+      peakHours
+    ] = await Promise.all([
+      // Patient registration trends (last 6 months)
+      Patient.aggregate([
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$registrationDate" } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { "_id": -1 } },
+        { $limit: 6 }
+      ]),
+      // Most booked doctors
+      Appointment.aggregate([
+        { $group: { _id: "$doctorId", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 5 },
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "doctorInfo"
+          }
+        },
+        { $unwind: "$doctorInfo" },
+        {
+          $project: {
+            name: "$doctorInfo.name",
+            specialization: "$doctorInfo.specialization",
+            count: 1
+          }
+        }
+      ]),
+      // Peak appointment hours
+      Appointment.aggregate([
+        { $group: { _id: "$timeSlot", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 5 }
+      ])
+    ]);
+
     res.json({
       success: true,
       data: {
@@ -45,18 +92,21 @@ router.get("/admin", authMiddleware, isAdmin, async (req, res) => {
         monthlyAppointments,
         proUsers,
         simulatedRevenue,
-        recentAppointments
+        recentAppointments,
+        registrationTrends,
+        topDoctors,
+        peakHours
       }
     });
+
   } catch (error) {
-    console.error("Admin Analytics Error:", error);
-    res.status(500).json({ success: false, message: "Server error checking analytics" });
+    next(error);
   }
 });
 
 // @desc    Doctor Analytics Dashboard
 // @route   GET /api/analytics/doctor
-router.get("/doctor", authMiddleware, isDoctor, async (req, res) => {
+router.get("/doctor", authMiddleware, isDoctor, async (req, res, next) => {
   try {
     const doctorId = req.user.userId;
     const now = new Date();
@@ -90,8 +140,7 @@ router.get("/doctor", authMiddleware, isDoctor, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Doctor Analytics Error:", error);
-    res.status(500).json({ success: false, message: "Server error checking analytics" });
+    next(error);
   }
 });
 

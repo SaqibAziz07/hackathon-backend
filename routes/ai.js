@@ -23,7 +23,7 @@ const handleAIFallback = (res, fallbackData) => {
 
 // @desc    Smart Symptom Checker
 // @route   POST /api/ai/symptom-checker
-router.post("/symptom-checker", authMiddleware, async (req, res) => {
+router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
   const { symptoms, age, gender, medicalHistory, patientId } = req.body;
 
   if (!groq) {
@@ -43,9 +43,17 @@ router.post("/symptom-checker", authMiddleware, async (req, res) => {
     
     Provide a JSON response with exactly this structure:
     {
-      "possibleConditions": ["Condition 1", "Condition 2"],
-      "riskLevel": "low" | "medium" | "high",
-      "suggestedTests": ["Test 1", "Test 2"]
+      "riskAssessment": {
+        "level": "low" | "medium" | "high",
+        "confidence": number (percentage 0-100)
+      },
+      "possibleConditions": [
+        { "name": "string", "match": number (percentage) }
+      ],
+      "summary": "short medical summary",
+      "carePlan": "clinical care plan",
+      "suggestedTests": ["Test 1", "Test 2"],
+      "redFlags": ["specific warning signs to monitor"]
     }`;
 
     const completion = await groq.chat.completions.create({
@@ -71,7 +79,8 @@ router.post("/symptom-checker", authMiddleware, async (req, res) => {
         gender,
         medicalHistory,
         aiResponse,
-        riskLevel: aiResponse.riskLevel
+        riskLevel: aiResponse.riskAssessment?.level || 'medium',
+        aiConfidence: aiResponse.riskAssessment?.confidence || 0
       });
     }
 
@@ -93,7 +102,7 @@ router.post("/symptom-checker", authMiddleware, async (req, res) => {
 
 // @desc    Explain Prescription to Patient
 // @route   POST /api/ai/explain-prescription
-router.post("/explain-prescription", authMiddleware, async (req, res) => {
+router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
   const { diagnosis, medicines, advice, language = "English" } = req.body;
 
   if (!groq) {
@@ -146,7 +155,7 @@ router.post("/explain-prescription", authMiddleware, async (req, res) => {
 
 // @desc    Risk Flagging & Predictive Analysis (Requires Pro Plan)
 // @route   POST /api/ai/risk-flagging
-router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res) => {
+router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next) => {
   const { patientHistory } = req.body;
 
   if (!groq) {
@@ -192,6 +201,24 @@ router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res) => {
       chronicDetect: false,
       insights: "AI system error during analysis."
     });
+  }
+});
+
+// @desc    Get AI Diagnosis History for a Patient
+// @route   GET /api/ai/history/:patientId
+router.get("/history/:patientId", authMiddleware, async (req, res, next) => {
+  try {
+    const history = await DiagnosisLog.find({ patientId: req.params.patientId })
+      .sort({ createdAt: -1 })
+      .limit(10);
+      
+    res.json({
+      success: true,
+      history
+    });
+  } catch (error) {
+    console.error("AI History Error:", error);
+    res.status(500).json({ success: false, message: "Error fetching history" });
   }
 });
 

@@ -10,7 +10,7 @@ const router = express.Router();
 // @route   POST /api/appointments
 router.post("/", authMiddleware, async (req, res) => {
   try {
-    const { patientId, doctorId, date, timeSlot, symptoms } = req.body;
+    const { patientId, doctorId, date, timeSlot, symptoms, appointmentType } = req.body;
 
     let finalPatientId = patientId;
 
@@ -75,6 +75,7 @@ router.post("/", authMiddleware, async (req, res) => {
       date,
       timeSlot,
       symptoms,
+      appointmentType: appointmentType || 'new',
       createdBy: req.user.userId
     };
 
@@ -94,37 +95,33 @@ router.post("/", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Create appointment error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
-// @desc    Get all appointments (with filters)
+// @desc    Get all appointments (with filters and pagination)
 // @route   GET /api/appointments
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", authMiddleware, async (req, res, next) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
     let query = {};
     const { status, doctorId, patientId, date } = req.query;
 
     // Role-based filtering
     if (req.user.role === 'doctor') {
-      // Doctors see only their appointments
       query.doctorId = req.user.userId;
     } else if (req.user.role === 'patient') {
-      // Patients see only their appointments
-      const patientUser = await User.findById(req.user.userId);
-      if (patientUser?.role === 'patient') {
-        // Find patient record for this user
-        const patient = await Patient.findOne({ email: patientUser.email });
-        if (patient) {
-          query.patientId = patient._id;
-        }
+      const patient = await Patient.findOne({ email: req.user.email });
+      if (patient) {
+        query.patientId = patient._id;
+      } else {
+        // If no patient record, return empty but success
+        return res.json({ success: true, count: 0, total: 0, page, pages: 0, appointments: [] });
       }
     }
-    // Admin and receptionist see all (no filter)
 
     // Apply query filters
     if (status) query.status = status;
@@ -138,24 +135,28 @@ router.get("/", authMiddleware, async (req, res) => {
       query.date = { $gte: startDate, $lte: endDate };
     }
 
-    const appointments = await Appointment.find(query)
-      .populate('patientId', 'name age gender contact')
-      .populate('doctorId', 'name specialization')
-      .populate('createdBy', 'name role')
-      .sort({ date: -1, timeSlot: 1 });
+    const [appointments, total] = await Promise.all([
+      Appointment.find(query)
+        .populate('patientId', 'name age gender contact')
+        .populate('doctorId', 'name specialization')
+        .populate('createdBy', 'name role')
+        .sort({ date: -1, timeSlot: 1 })
+        .skip(skip)
+        .limit(limit),
+      Appointment.countDocuments(query)
+    ]);
 
     res.json({
       success: true,
       count: appointments.length,
+      total,
+      page,
+      pages: Math.ceil(total / limit),
       appointments
     });
 
   } catch (error) {
-    console.error("Get appointments error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
@@ -200,21 +201,18 @@ router.get("/:id", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get appointment error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
 // @desc    Update appointment status
 // @route   PUT /api/appointments/:id/status
-router.put("/:id/status", authMiddleware, async (req, res) => {
+router.put("/:id/status", authMiddleware, async (req, res, next) => {
   try {
-    const { status } = req.body;
+    const { status, cancellationReason } = req.body;
 
-    if (!['pending', 'confirmed', 'completed', 'cancelled'].includes(status)) {
+    const validStatuses = ['pending', 'confirmed', 'checked-in', 'in-consultation', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status)) {
       return res.status(400).json({ 
         success: false, 
         message: "Invalid status" 
@@ -264,6 +262,12 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       }
     }
     // Admin and receptionist can update any status
+    
+    // Update timing based on status
+    if (status === 'checked-in') appointment.checkedInTime = new Date();
+    if (status === 'in-consultation') appointment.consultationStartTime = new Date();
+    if (status === 'completed') appointment.consultationEndTime = new Date();
+    if (status === 'cancelled' && cancellationReason) appointment.cancellationReason = cancellationReason;
 
     appointment.status = status;
     await appointment.save();
@@ -279,11 +283,7 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Update appointment status error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
@@ -325,11 +325,7 @@ router.get("/available-slots/:doctorId/:date", authMiddleware, async (req, res) 
     });
 
   } catch (error) {
-    console.error("Get available slots error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
@@ -375,11 +371,7 @@ router.get("/doctor/schedule", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get doctor schedule error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
@@ -416,11 +408,7 @@ router.get("/patient/history", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Get patient history error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    next(error);
   }
 });
 
