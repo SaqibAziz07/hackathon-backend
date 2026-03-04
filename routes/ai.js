@@ -1,5 +1,6 @@
 import express from "express";
 import Groq from "groq-sdk";
+import { z } from "zod";
 import DiagnosisLog from "../models/DiagnosisLog.js";
 import authMiddleware from "../middleware/auth.js";
 import { hasProPlan } from "../middleware/roles.js";
@@ -21,20 +22,40 @@ const handleAIFallback = (res, fallbackData) => {
   });
 };
 
-// @desc    Smart Symptom Checker
-// @route   POST /api/ai/symptom-checker
+// Zod schemas for validation
+const symptomCheckerSchema = z.object({
+  symptoms: z.string().min(5),
+  age: z.number().int().min(0).max(120),
+  gender: z.enum(["Male", "Female", "Other"]).optional(),
+  medicalHistory: z.string().optional(),
+  patientId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+});
+
+const explainPrescriptionSchema = z.object({
+  diagnosis: z.string().min(3),
+  medicines: z.array(z.object({})).optional(), // Loose for flexibility
+  advice: z.string().optional(),
+  language: z.string().default("English"),
+});
+
+const riskFlaggingSchema = z.object({
+  patientHistory: z.array(z.object({})).min(1),
+});
+
+// Smart Symptom Checker
 router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
-  const { symptoms, age, gender, medicalHistory, patientId } = req.body;
-
-  if (!groq) {
-    return handleAIFallback(res, {
-      conditions: ["Consult Doctor for accurate diagnosis"],
-      riskLevel: "medium",
-      suggestedTests: ["Complete Blood Count (CBC)", "General Physical Exam"]
-    });
-  }
-
   try {
+    const validated = symptomCheckerSchema.parse(req.body);
+    const { symptoms, age, gender, medicalHistory, patientId } = validated;
+
+    if (!groq) {
+      return handleAIFallback(res, {
+        conditions: ["Consult Doctor for accurate diagnosis"],
+        riskLevel: "medium",
+        suggestedTests: ["Complete Blood Count (CBC)", "General Physical Exam"]
+      });
+    }
+
     const prompt = `As a medical AI assistant, analyze the following case:
     Symptoms: ${symptoms}
     Age: ${age}
@@ -91,6 +112,9 @@ router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
     });
 
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
+    }
     console.error("AI Symptom Checker Error:", error);
     return handleAIFallback(res, {
       conditions: ["Consult Doctor for accurate diagnosis (AI Error)"],
@@ -100,20 +124,20 @@ router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Explain Prescription to Patient
-// @route   POST /api/ai/explain-prescription
+// Explain Prescription to Patient
 router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
-  const { diagnosis, medicines, advice, language = "English" } = req.body;
-
-  if (!groq) {
-    return handleAIFallback(res, {
-      simpleExplanation: `For ${diagnosis}, please take medicines as prescribed. ${advice}`,
-      lifestyleRecommendations: ["Rest well", "Drink plenty of water", "Follow up as advised"],
-      preventiveAdvice: ["Maintain hygiene", "Take prescribed doses accurately"]
-    });
-  }
-
   try {
+    const validated = explainPrescriptionSchema.parse(req.body);
+    const { diagnosis, medicines, advice, language } = validated;
+
+    if (!groq) {
+      return handleAIFallback(res, {
+        simpleExplanation: `For ${diagnosis}, please take medicines as prescribed. ${advice}`,
+        lifestyleRecommendations: ["Rest well", "Drink plenty of water", "Follow up as advised"],
+        preventiveAdvice: ["Maintain hygiene", "Take prescribed doses accurately"]
+      });
+    }
+
     const prompt = `Translate this medical prescription into simple, easy-to-understand terms for a patient in ${language}.
     Diagnosis: ${diagnosis}
     Medicines: ${JSON.stringify(medicines)}
@@ -144,6 +168,9 @@ router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
     });
 
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
+    }
     console.error("AI Explain Error:", error);
     return handleAIFallback(res, {
       simpleExplanation: `For ${diagnosis}, please take medicines as prescribed. ${advice}`,
@@ -153,20 +180,20 @@ router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Risk Flagging & Predictive Analysis (Requires Pro Plan)
-// @route   POST /api/ai/risk-flagging
+// Risk Flagging & Predictive Analysis (Requires Pro Plan)
 router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next) => {
-  const { patientHistory } = req.body;
-
-  if (!groq) {
-    return handleAIFallback(res, {
-      riskFlags: ["Standard monitoring recommended"],
-      chronicDetect: false,
-      insights: "AI analysis unavailable. Please review manually."
-    });
-  }
-
   try {
+    const validated = riskFlaggingSchema.parse(req.body);
+    const { patientHistory } = validated;
+
+    if (!groq) {
+      return handleAIFallback(res, {
+        riskFlags: ["Standard monitoring recommended"],
+        chronicDetect: false,
+        insights: "AI analysis unavailable. Please review manually."
+      });
+    }
+
     const prompt = `Analyze this patient's medical history timeline and detect any chronic patterns or high-risk infection combinations.
     History: ${JSON.stringify(patientHistory)}
     
@@ -195,6 +222,9 @@ router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next)
     });
 
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
+    }
     console.error("AI Risk Flagging Error:", error);
     return handleAIFallback(res, {
       riskFlags: ["Manual doctor review required"],
@@ -204,8 +234,7 @@ router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next)
   }
 });
 
-// @desc    Get AI Diagnosis History for a Patient
-// @route   GET /api/ai/history/:patientId
+// Get AI Diagnosis History for a Patient
 router.get("/history/:patientId", authMiddleware, async (req, res, next) => {
   try {
     const history = await DiagnosisLog.find({ patientId: req.params.patientId })

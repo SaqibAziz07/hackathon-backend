@@ -1,4 +1,5 @@
 import express from "express";
+import { z } from "zod";
 import Appointment from "../models/Appointment.js";
 import Patient from "../models/Patient.js";
 import User from "../models/User.js";
@@ -6,11 +7,21 @@ import authMiddleware from "../middleware/auth.js";
 
 const router = express.Router();
 
-// @desc    Create new appointment (Receptionist/Admin/Patient)
-// @route   POST /api/appointments
-router.post("/", authMiddleware, async (req, res) => {
+// Zod schema for appointment creation
+const createAppointmentSchema = z.object({
+  patientId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(), // Optional for patients booking themselves
+  doctorId: z.string().regex(/^[0-9a-fA-F]{24}$/),
+  date: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "Invalid date" }),
+  timeSlot: z.string().min(1),
+  symptoms: z.string().optional(),
+  appointmentType: z.enum(['new', 'follow-up', 'emergency', 'lab-test']).optional(),
+});
+
+// Create new appointment (Receptionist/Admin/Patient)
+router.post("/", authMiddleware, async (req, res, next) => {
   try {
-    const { patientId, doctorId, date, timeSlot, symptoms, appointmentType } = req.body;
+    const validated = createAppointmentSchema.parse(req.body);
+    const { patientId, doctorId, date, timeSlot, symptoms, appointmentType } = validated;
 
     let finalPatientId = patientId;
 
@@ -23,12 +34,11 @@ router.post("/", authMiddleware, async (req, res) => {
       
       let patientDoc = await Patient.findOne({ email: patientUser.email });
       if (!patientDoc) {
-        // Automatically create a base patient profile if missing
         patientDoc = await Patient.create({
           name: patientUser.name,
           email: patientUser.email,
           contact: patientUser.phone || "0000000000",
-          age: 30, // Default placeholders
+          age: 30,
           gender: 'Other',
           createdBy: patientUser._id
         });
@@ -72,7 +82,7 @@ router.post("/", authMiddleware, async (req, res) => {
     const appointmentData = {
       patientId: finalPatientId,
       doctorId,
-      date,
+      date: new Date(date),
       timeSlot,
       symptoms,
       appointmentType: appointmentType || 'new',
@@ -95,12 +105,14 @@ router.post("/", authMiddleware, async (req, res) => {
     });
 
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
+    }
     next(error);
   }
 });
 
-// @desc    Get all appointments (with filters and pagination)
-// @route   GET /api/appointments
+// Get all appointments (with filters and pagination)
 router.get("/", authMiddleware, async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -118,7 +130,6 @@ router.get("/", authMiddleware, async (req, res, next) => {
       if (patient) {
         query.patientId = patient._id;
       } else {
-        // If no patient record, return empty but success
         return res.json({ success: true, count: 0, total: 0, page, pages: 0, appointments: [] });
       }
     }
@@ -160,9 +171,87 @@ router.get("/", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Get single appointment
-// @route   GET /api/appointments/:id
-router.get("/:id", authMiddleware, async (req, res) => {
+// Get doctor's schedule — MUST be before /:id to avoid "doctor" being treated as an id
+router.get("/doctor/schedule", authMiddleware, async (req, res, next) => {
+  try {
+    if (req.user.role !== 'doctor') {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Access denied. Doctors only." 
+      });
+    }
+
+    const { startDate, endDate } = req.query;
+    
+    let query = { doctorId: req.user.userId };
+    
+    if (startDate && endDate) {
+      query.date = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    const appointments = await Appointment.find(query)
+      .populate('patientId', 'name age gender contact')
+      .sort({ date: 1, timeSlot: 1 });
+
+    const schedule = appointments.reduce((acc, apt) => {
+      const dateStr = apt.date.toISOString().split('T')[0];
+      if (!acc[dateStr]) {
+        acc[dateStr] = [];
+      }
+      acc[dateStr].push(apt);
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      schedule
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get patient's appointment history — MUST be before /:id
+router.get("/patient/history", authMiddleware, async (req, res, next) => {
+  try {
+    if (req.user.role !== 'patient') {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Access denied. Patients only." 
+      });
+    }
+
+    const patientUser = await User.findById(req.user.userId);
+    const patient = await Patient.findOne({ email: patientUser.email });
+
+    if (!patient) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Patient record not found" 
+      });
+    }
+
+    const appointments = await Appointment.find({ patientId: patient._id })
+      .populate('doctorId', 'name specialization')
+      .sort({ date: -1, timeSlot: -1 });
+
+    res.json({
+      success: true,
+      count: appointments.length,
+      appointments
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single appointment
+router.get("/:id", authMiddleware, async (req, res, next) => {
   try {
     const appointment = await Appointment.findById(req.params.id)
       .populate('patientId', 'name age gender contact email address')
@@ -205,8 +294,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// @desc    Update appointment status
-// @route   PUT /api/appointments/:id/status
+// Update appointment status
 router.put("/:id/status", authMiddleware, async (req, res, next) => {
   try {
     const { status, cancellationReason } = req.body;
@@ -230,14 +318,12 @@ router.put("/:id/status", authMiddleware, async (req, res, next) => {
 
     // Check permissions
     if (req.user.role === 'doctor') {
-      // Doctors can only update their own appointments
       if (appointment.doctorId.toString() !== req.user.userId) {
         return res.status(403).json({ 
           success: false, 
           message: "Access denied" 
         });
       }
-      // Doctors can only mark as confirmed/completed
       if (!['confirmed', 'completed'].includes(status)) {
         return res.status(403).json({ 
           success: false, 
@@ -245,7 +331,6 @@ router.put("/:id/status", authMiddleware, async (req, res, next) => {
         });
       }
     } else if (req.user.role === 'patient') {
-      // Patients can only cancel their appointments
       const patientUser = await User.findById(req.user.userId);
       const patient = await Patient.findOne({ email: patientUser.email });
       if (appointment.patientId.toString() !== patient?._id.toString()) {
@@ -261,7 +346,6 @@ router.put("/:id/status", authMiddleware, async (req, res, next) => {
         });
       }
     }
-    // Admin and receptionist can update any status
     
     // Update timing based on status
     if (status === 'checked-in') appointment.checkedInTime = new Date();
@@ -287,20 +371,17 @@ router.put("/:id/status", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Get available time slots for a doctor on a date
-// @route   GET /api/appointments/available-slots
-router.get("/available-slots/:doctorId/:date", authMiddleware, async (req, res) => {
+// Get available time slots for a doctor on a date
+router.get("/available-slots/:doctorId/:date", authMiddleware, async (req, res, next) => {
   try {
     const { doctorId, date } = req.params;
     
-    // All possible time slots (30 min intervals)
     const allSlots = [
       "09:00 AM", "09:30 AM", "10:00 AM", "10:30 AM", "11:00 AM", "11:30 AM",
       "12:00 PM", "12:30 PM", "02:00 PM", "02:30 PM", "03:00 PM", "03:30 PM",
       "04:00 PM", "04:30 PM", "05:00 PM", "05:30 PM"
     ];
 
-    // Get booked slots
     const startDate = new Date(date);
     startDate.setHours(0, 0, 0, 0);
     const endDate = new Date(date);
@@ -314,7 +395,6 @@ router.get("/available-slots/:doctorId/:date", authMiddleware, async (req, res) 
 
     const bookedSlots = bookedAppointments.map(apt => apt.timeSlot);
 
-    // Filter available slots
     const availableSlots = allSlots.filter(slot => !bookedSlots.includes(slot));
 
     res.json({
@@ -322,89 +402,6 @@ router.get("/available-slots/:doctorId/:date", authMiddleware, async (req, res) 
       date,
       availableSlots,
       bookedSlots
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// @desc    Get doctor's schedule
-// @route   GET /api/appointments/doctor/schedule
-router.get("/doctor/schedule", authMiddleware, async (req, res) => {
-  try {
-    if (req.user.role !== 'doctor') {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Access denied. Doctors only." 
-      });
-    }
-
-    const { startDate, endDate } = req.query;
-    
-    let query = { doctorId: req.user.userId };
-    
-    if (startDate && endDate) {
-      query.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
-      };
-    }
-
-    const appointments = await Appointment.find(query)
-      .populate('patientId', 'name age gender contact')
-      .sort({ date: 1, timeSlot: 1 });
-
-    // Group by date
-    const schedule = appointments.reduce((acc, apt) => {
-      const dateStr = apt.date.toISOString().split('T')[0];
-      if (!acc[dateStr]) {
-        acc[dateStr] = [];
-      }
-      acc[dateStr].push(apt);
-      return acc;
-    }, {});
-
-    res.json({
-      success: true,
-      schedule
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// @desc    Get patient's appointment history
-// @route   GET /api/appointments/patient/history
-router.get("/patient/history", authMiddleware, async (req, res) => {
-  try {
-    if (req.user.role !== 'patient') {
-      return res.status(403).json({ 
-        success: false, 
-        message: "Access denied. Patients only." 
-      });
-    }
-
-    // Find patient record for this user
-    const patientUser = await User.findById(req.user.userId);
-    const patient = await Patient.findOne({ email: patientUser.email });
-
-    if (!patient) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Patient record not found" 
-      });
-    }
-
-    const appointments = await Appointment.find({ patientId: patient._id })
-      .populate('doctorId', 'name specialization')
-      .sort({ date: -1, timeSlot: -1 });
-
-    res.json({
-      success: true,
-      count: appointments.length,
-      appointments
     });
 
   } catch (error) {

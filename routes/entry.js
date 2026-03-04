@@ -4,9 +4,7 @@ import authMiddleware from "../middleware/auth.js";
 
 const router = express.Router();
 
-// 🔐 All routes protected
-// @desc    Get all entries for a user
-// @route   GET /api/entries
+// Get all entries for a user
 router.get("/", authMiddleware, async (req, res, next) => {
   try {
     const entries = await Entry.find({ userId: req.user.userId })
@@ -21,8 +19,7 @@ router.get("/", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Create a new entry
-// @route   POST /api/entries
+// Create a new entry
 router.post("/", authMiddleware, async (req, res, next) => {
   try {
     const entry = new Entry({
@@ -39,8 +36,7 @@ router.post("/", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Delete an entry
-// @route   DELETE /api/entries/:id
+// Delete an entry
 router.delete("/:id", authMiddleware, async (req, res, next) => {
   try {
     const entry = await Entry.findOneAndDelete({

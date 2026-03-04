@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 
 const entrySchema = new mongoose.Schema({
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true, // required so entries are always scoped to a user
+  },
   userInput: {
     type: String,
     required: true,
@@ -19,5 +24,8 @@ const entrySchema = new mongoose.Schema({
   },
 });
 
-const Entry = mongoose.model("Entry", entrySchema);
+// Add index if used frequently
+entrySchema.index({ userId: 1, createdAt: -1 });
+
+const Entry = mongoose.models.Entry || mongoose.model("Entry", entrySchema);
 export default Entry;

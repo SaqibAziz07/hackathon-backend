@@ -5,8 +5,7 @@ import { isAdmin } from "../middleware/roles.js";
 
 const router = express.Router();
 
-// @desc    Get all doctors
-// @route   GET /api/users/doctors
+// Get all doctors
 router.get("/doctors", authMiddleware, async (req, res, next) => {
   try {
     const doctors = await User.find({ role: "doctor" })
@@ -23,8 +22,7 @@ router.get("/doctors", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Get all receptionists (admin only)
-// @route   GET /api/users/receptionists
+// Get all receptionists (admin only)
 router.get("/receptionists", authMiddleware, isAdmin, async (req, res, next) => {
   try {
     const receptionists = await User.find({ role: "receptionist" })
@@ -41,8 +39,7 @@ router.get("/receptionists", authMiddleware, isAdmin, async (req, res, next) => 
   }
 });
 
-// @desc    Get single user by ID
-// @route   GET /api/users/:id
+// Get single user by ID
 router.get("/:id", authMiddleware, async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id)

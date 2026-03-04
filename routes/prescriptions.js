@@ -1,30 +1,43 @@
 import express from "express";
+import { z } from "zod";
 import Prescription from "../models/Prescription.js";
 import Appointment from "../models/Appointment.js";
 import Patient from "../models/Patient.js";
 import authMiddleware from "../middleware/auth.js";
 import { generatePrescriptionPDF } from "../utils/pdfGenerator.js";
-
-import { isAdmin, isDoctor } from "../middleware/roles.js";
+import { isDoctor } from "../middleware/roles.js";
 
 const router = express.Router();
 
-// @desc    Create prescription (Doctor only)
-// @route   POST /api/prescriptions
+// Zod schema for prescription
+const prescriptionSchema = z.object({
+  patientId: z.string().regex(/^[0-9a-fA-F]{24}$/),
+  appointmentId: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  diagnosis: z.string().min(3),
+  symptoms: z.string().min(5),
+  medicines: z.array(z.object({
+    name: z.string().min(2),
+    dosage: z.string().min(1),
+    form: z.enum(['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Drops', 'Other']).optional(),
+    frequency: z.string().min(3),
+    duration: z.string().min(2),
+    instructions: z.string().optional(),
+    beforeFood: z.boolean().optional(),
+  })).optional(),
+  tests: z.array(z.object({
+    name: z.string().min(2),
+    instructions: z.string().optional(),
+  })).optional(),
+  advice: z.string().optional(),
+  followUpDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "Invalid date" }).optional(),
+});
+
+// Create prescription (Doctor only)
 router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
   try {
+    const validated = prescriptionSchema.parse(req.body);
+    const { patientId, appointmentId, diagnosis, symptoms, medicines, tests, advice, followUpDate } = validated;
 
-    const { patientId, appointmentId, diagnosis, symptoms, medicines, tests, advice, followUpDate } = req.body;
-
-    // Validation
-    if (!patientId || !diagnosis || !symptoms) {
-      return res.status(400).json({
-        success: false,
-        message: "Patient, diagnosis and symptoms are required"
-      });
-    }
-
-    // Check if patient exists
     const patient = await Patient.findById(patientId);
     if (!patient) {
       return res.status(404).json({
@@ -33,7 +46,6 @@ router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
       });
     }
 
-    // If appointmentId provided, check if it exists and belongs to this doctor
     if (appointmentId) {
       const appointment = await Appointment.findById(appointmentId);
       if (!appointment) {
@@ -50,12 +62,10 @@ router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
         });
       }
 
-      // Update appointment status to completed
       appointment.status = 'completed';
       await appointment.save();
     }
 
-    // Create prescription
     const prescriptionData = {
       patientId,
       doctorId: req.user.userId,
@@ -65,19 +75,16 @@ router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
       medicines: medicines || [],
       tests: tests || [],
       advice: advice || '',
-      aiSummary: aiSummary || '',
-      followUpDate
+      followUpDate: followUpDate ? new Date(followUpDate) : undefined
     };
 
     const prescription = new Prescription(prescriptionData);
     await prescription.save();
 
-    // Populate data for PDF generation
     const populatedPrescription = await Prescription.findById(prescription._id)
       .populate('patientId', 'name age gender contact')
       .populate('doctorId', 'name specialization');
 
-    // Generate PDF
     try {
       const pdfUrl = await generatePrescriptionPDF(populatedPrescription);
       prescription.pdfUrl = pdfUrl;
@@ -85,7 +92,6 @@ router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
       populatedPrescription.pdfUrl = pdfUrl;
     } catch (pdfError) {
       console.error("PDF Generation error:", pdfError);
-      // We continue even if PDF fails, as the record is saved
     }
 
     res.status(201).json({
@@ -95,12 +101,14 @@ router.post("/", authMiddleware, isDoctor, async (req, res, next) => {
     });
 
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
+    }
     next(error);
   }
 });
 
-// @desc    Get all prescriptions (role-based with pagination)
-// @route   GET /api/prescriptions
+// Get all prescriptions (role-based with pagination)
 router.get("/", authMiddleware, async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -109,7 +117,6 @@ router.get("/", authMiddleware, async (req, res, next) => {
 
     let query = {};
     
-    // Role-based filtering
     if (req.user.role === 'doctor') {
       query.doctorId = req.user.userId;
     } else if (req.user.role === 'patient') {
@@ -145,9 +152,38 @@ router.get("/", authMiddleware, async (req, res, next) => {
   }
 });
 
-// @desc    Get single prescription
-// @route   GET /api/prescriptions/:id
-router.get("/:id", authMiddleware, async (req, res) => {
+// Get patient's prescription history — MUST be before /:id to avoid being swallowed by it
+router.get("/patient/:patientId", authMiddleware, async (req, res, next) => {
+  try {
+    const { patientId } = req.params;
+
+    if (req.user.role === 'patient') {
+      const patient = await Patient.findOne({ email: req.user.email });
+      if (!patient || patient._id.toString() !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied"
+        });
+      }
+    }
+
+    const prescriptions = await Prescription.find({ patientId })
+      .populate('doctorId', 'name specialization')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      count: prescriptions.length,
+      prescriptions
+    });
+
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get single prescription
+router.get("/:id", authMiddleware, async (req, res, next) => {
   try {
     const prescription = await Prescription.findById(req.params.id)
       .populate('patientId', 'name age gender contact email')
@@ -171,10 +207,11 @@ router.get("/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// @desc    Update prescription (Doctor only)
-// @route   PUT /api/prescriptions/:id
+// Update prescription (Doctor only)
 router.put("/:id", authMiddleware, isDoctor, async (req, res, next) => {
   try {
+    const validated = prescriptionSchema.parse(req.body);
+
     const prescription = await Prescription.findById(req.params.id);
     
     if (!prescription) {
@@ -184,7 +221,6 @@ router.put("/:id", authMiddleware, isDoctor, async (req, res, next) => {
       });
     }
 
-    // Check if this prescription belongs to the doctor
     if (prescription.doctorId.toString() !== req.user.userId) {
       return res.status(403).json({
         success: false,
@@ -194,7 +230,7 @@ router.put("/:id", authMiddleware, isDoctor, async (req, res, next) => {
 
     const updatedPrescription = await Prescription.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      validated,
       { new: true, runValidators: true }
     ).populate('patientId', 'name age gender contact')
      .populate('doctorId', 'name specialization');
@@ -206,12 +242,14 @@ router.put("/:id", authMiddleware, isDoctor, async (req, res, next) => {
     });
 
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
+    }
     next(error);
   }
 });
 
-// @desc    Delete prescription (Doctor/Admin only)
-// @route   DELETE /api/prescriptions/:id
+// Delete prescription (Doctor/Admin only)
 router.delete("/:id", authMiddleware, async (req, res, next) => {
   try {
     if (!['doctor', 'admin'].includes(req.user.role)) {
@@ -230,7 +268,6 @@ router.delete("/:id", authMiddleware, async (req, res, next) => {
       });
     }
 
-    // Doctors can only delete their own prescriptions
     if (req.user.role === 'doctor' && prescription.doctorId.toString() !== req.user.userId) {
       return res.status(403).json({
         success: false,
@@ -243,38 +280,6 @@ router.delete("/:id", authMiddleware, async (req, res, next) => {
     res.json({
       success: true,
       message: "Prescription deleted successfully"
-    });
-
-  } catch (error) {
-    next(error);
-  }
-});
-
-// @desc    Get patient's prescription history
-// @route   GET /api/prescriptions/patient/:patientId
-router.get("/patient/:patientId", authMiddleware, async (req, res) => {
-  try {
-    const { patientId } = req.params;
-
-    // Check access
-    if (req.user.role === 'patient') {
-      const patient = await Patient.findOne({ email: req.user.email });
-      if (!patient || patient._id.toString() !== patientId) {
-        return res.status(403).json({
-          success: false,
-          message: "Access denied"
-        });
-      }
-    }
-
-    const prescriptions = await Prescription.find({ patientId })
-      .populate('doctorId', 'name specialization')
-      .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      count: prescriptions.length,
-      prescriptions
     });
 
   } catch (error) {

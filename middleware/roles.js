@@ -1,12 +1,12 @@
-// Check if user is admin
+// Check if user is admin (also allows super-admin)
 export const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
+  if (!['admin', 'super-admin'].includes(req.user.role)) {
     return res.status(403).json({ 
       success: false, 
       message: 'Access denied. Admin only.' 
     });
   }
-  next();
+  next()
 };
 
 // Check if user is doctor

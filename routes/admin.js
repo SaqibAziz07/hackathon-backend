@@ -7,11 +7,10 @@ import { isAdmin } from "../middleware/roles.js";
 
 const router = express.Router();
 
-// 🔐 Admin only for all routes
+// Admin only for all routes
 router.use(authMiddleware, isAdmin);
 
-// @desc    Get all users with filters
-// @route   GET /api/admin/users
+// Get all users with filters
 router.get("/users", async (req, res, next) => {
   try {
     const { role, status, search } = req.query;
@@ -38,8 +37,7 @@ router.get("/users", async (req, res, next) => {
   }
 });
 
-// @desc    Update user role or status (Approve/Block)
-// @route   PUT /api/admin/users/:id
+// Update user role or status (Approve/Block)
 router.put("/users/:id", async (req, res, next) => {
   try {
     const { role, status } = req.body;
@@ -72,8 +70,7 @@ router.put("/users/:id", async (req, res, next) => {
   }
 });
 
-// @desc    Get audit logs
-// @route   GET /api/admin/audit-logs
+// Get audit logs
 router.get("/audit-logs", async (req, res, next) => {
   try {
     const logs = await AuditLog.find()
@@ -91,8 +88,7 @@ router.get("/audit-logs", async (req, res, next) => {
   }
 });
 
-// @desc    Get system settings
-// @route   GET /api/admin/settings
+// Get system settings
 router.get("/settings", async (req, res, next) => {
   try {
     let settings = await Settings.findOne();
@@ -105,8 +101,7 @@ router.get("/settings", async (req, res, next) => {
   }
 });
 
-// @desc    Update system settings
-// @route   PUT /api/admin/settings
+// Update system settings
 router.put("/settings", async (req, res, next) => {
   try {
     let settings = await Settings.findOne();

@@ -1,6 +1,10 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Generates a PDF prescription and saves it to the public folder
@@ -10,8 +14,8 @@ import path from 'path';
 export const generatePrescriptionPDF = async (prescription) => {
   return new Promise((resolve, reject) => {
     try {
-      // Create public/prescriptions directory structure if it doesn't exist
-      const publicDir = path.join(process.cwd(), 'public');
+      // Use __dirname (relative to this file) so path is always correct regardless of cwd
+      const publicDir = path.join(__dirname, '..', 'public');
       const prescriptionsDir = path.join(publicDir, 'prescriptions');
       
       if (!fs.existsSync(publicDir)) {
@@ -21,18 +25,15 @@ export const generatePrescriptionPDF = async (prescription) => {
         fs.mkdirSync(prescriptionsDir);
       }
 
-      // Format current date
       const dateStr = new Date().toISOString().split('T')[0];
       const fileName = `prescription_${prescription._id}_${dateStr}.pdf`;
       const filePath = path.join(prescriptionsDir, fileName);
 
-      // Create PDF Document
       const doc = new PDFDocument({ margin: 50 });
       const stream = fs.createWriteStream(filePath);
       
       doc.pipe(stream);
 
-      // Clinic Header
       doc.fontSize(24)
          .font('Helvetica-Bold')
          .text('Smart Clinic SaaS', { align: 'center' });
@@ -43,11 +44,9 @@ export const generatePrescriptionPDF = async (prescription) => {
       
       doc.moveDown(2);
       
-      // Divider
       doc.lineWidth(1).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
       doc.moveDown();
 
-      // Details Section
       doc.fontSize(12).font('Helvetica-Bold').text('Doctor Details:');
       doc.font('Helvetica').fontSize(10)
          .text(`Dr. ${prescription.doctorId.name}`)
@@ -65,7 +64,6 @@ export const generatePrescriptionPDF = async (prescription) => {
       doc.lineWidth(1).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
       doc.moveDown(2);
 
-      // Medical Info
       doc.fontSize(12).font('Helvetica-Bold').text('Diagnosis:');
       doc.font('Helvetica').fontSize(10).text(prescription.diagnosis);
       doc.moveDown();
@@ -74,9 +72,8 @@ export const generatePrescriptionPDF = async (prescription) => {
       doc.font('Helvetica').fontSize(10).text(prescription.symptoms);
       doc.moveDown(2);
 
-      // Rx (Medicines)
       doc.fontSize(18).font('Helvetica-Oblique').text('Rx', { continued: true });
-      doc.font('Helvetica').fontSize(12).text(''); // Reset
+      doc.font('Helvetica').fontSize(12).text('');
       doc.moveDown();
 
       if (prescription.medicines && prescription.medicines.length > 0) {
@@ -92,7 +89,6 @@ export const generatePrescriptionPDF = async (prescription) => {
         doc.fontSize(10).text('No medicines prescribed.');
       }
       
-      // Tests
       if (prescription.tests && prescription.tests.length > 0) {
         doc.moveDown();
         doc.fontSize(12).font('Helvetica-Bold').text('Prescribed Tests:');
@@ -101,30 +97,25 @@ export const generatePrescriptionPDF = async (prescription) => {
         });
       }
 
-      // Advice
       if (prescription.advice) {
         doc.moveDown();
         doc.fontSize(12).font('Helvetica-Bold').text('Doctor\'s Advice:');
         doc.fontSize(10).font('Helvetica').text(prescription.advice);
       }
 
-      // Follow up
       if (prescription.followUpDate) {
         doc.moveDown();
         doc.fontSize(12).font('Helvetica-Bold').text('Follow up Date:');
         doc.fontSize(10).font('Helvetica').text(new Date(prescription.followUpDate).toLocaleDateString());
       }
 
-      // Footer
       doc.moveDown(4);
       doc.fontSize(10).text('_________________________', { align: 'right' });
       doc.text("Doctor's Signature", { align: 'right' });
       
-      // Complete PDF
       doc.end();
 
       stream.on('finish', () => {
-        // Return URL accessible by frontend
         resolve(`/prescriptions/${fileName}`);
       });
 

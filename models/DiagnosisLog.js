@@ -33,5 +33,9 @@ const diagnosisLogSchema = new mongoose.Schema({
   }
 });
 
+// Add indexes
+diagnosisLogSchema.index({ patientId: 1, createdAt: -1 });
+diagnosisLogSchema.index({ doctorId: 1 });
+
 const DiagnosisLog = mongoose.models.DiagnosisLog || mongoose.model("DiagnosisLog", diagnosisLogSchema);
 export default DiagnosisLog;

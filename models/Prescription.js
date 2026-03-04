@@ -9,7 +9,6 @@ const medicineSchema = new mongoose.Schema({
   dosage: {
     type: String,
     required: true,
-    // enum: ['5mg', '10mg', '20mg', '50mg', '100mg', '250mg', '500mg', '1g', 'Other'] // Removed enum for flexibility as per user request
   },
   form: {
     type: String,
@@ -19,7 +18,6 @@ const medicineSchema = new mongoose.Schema({
   frequency: {
     type: String,
     required: true
-    // enum: ['Once daily', 'Twice daily', 'Three times daily', 'Four times daily', 'Every 4 hours', 'Every 6 hours', 'Every 8 hours', 'As needed'] // Removed enum for flexibility
   },
   duration: {
     type: String,
@@ -70,7 +68,7 @@ const prescriptionSchema = new mongoose.Schema({
   },
   medicines: [medicineSchema],
   tests: [testSchema],
-  aiSummary: String, // New field from user request
+  aiSummary: String,
   advice: {
     type: String,
     default: ''
@@ -101,6 +99,10 @@ const prescriptionSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Add indexes
+prescriptionSchema.index({ patientId: 1, createdAt: -1 });
+prescriptionSchema.index({ doctorId: 1 });
 
 const Prescription = mongoose.models.Prescription || mongoose.model("Prescription", prescriptionSchema);
 export default Prescription;

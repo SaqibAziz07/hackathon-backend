@@ -53,13 +53,17 @@ const patientSchema = new mongoose.Schema({
 // Generate MR Number before saving
 patientSchema.pre('save', async function(next) {
   if (!this.mrNumber) {
-    // Basic MR number generation: MR-TIMESTAMP-RANDOM
     const timestamp = Date.now().toString().slice(-6);
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     this.mrNumber = `MR-${timestamp}${random}`;
   }
-  next();
+  // next();
 });
+
+// Add indexes
+patientSchema.index({ name: 1 });
+patientSchema.index({ contact: 1 });
+patientSchema.index({ createdAt: -1 });
 
 const Patient = mongoose.models.Patient || mongoose.model("Patient", patientSchema);
 export default Patient;

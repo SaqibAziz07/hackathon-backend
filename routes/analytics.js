@@ -9,8 +9,7 @@ import { isAdmin, isDoctor } from "../middleware/roles.js";
 
 const router = express.Router();
 
-// @desc    Admin Analytics Dashboard
-// @route   GET /api/analytics/admin
+// Admin Analytics Dashboard
 router.get("/admin", authMiddleware, isAdmin, async (req, res, next) => {
   try {
     const now = new Date();
@@ -43,7 +42,6 @@ router.get("/admin", authMiddleware, isAdmin, async (req, res, next) => {
       topDoctors,
       peakHours
     ] = await Promise.all([
-      // Patient registration trends (last 6 months)
       Patient.aggregate([
         {
           $group: {
@@ -54,7 +52,6 @@ router.get("/admin", authMiddleware, isAdmin, async (req, res, next) => {
         { $sort: { "_id": -1 } },
         { $limit: 6 }
       ]),
-      // Most booked doctors
       Appointment.aggregate([
         { $group: { _id: "$doctorId", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
@@ -76,7 +73,6 @@ router.get("/admin", authMiddleware, isAdmin, async (req, res, next) => {
           }
         }
       ]),
-      // Peak appointment hours
       Appointment.aggregate([
         { $group: { _id: "$timeSlot", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
@@ -104,17 +100,13 @@ router.get("/admin", authMiddleware, isAdmin, async (req, res, next) => {
   }
 });
 
-// @desc    Doctor Analytics Dashboard
-// @route   GET /api/analytics/doctor
+// Doctor Analytics Dashboard
 router.get("/doctor", authMiddleware, isDoctor, async (req, res, next) => {
   try {
     const doctorId = req.user.userId;
     const now = new Date();
     
-    // Start of today
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
-    // Start of month
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const [

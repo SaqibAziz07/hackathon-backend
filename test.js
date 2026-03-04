@@ -1,12 +1,12 @@
-import OpenAI from "openai";
+import Groq from "groq-sdk";
 import dotenv from "dotenv";
 dotenv.config();
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 async function testKey() {
   try {
-    const response = await openai.models.list(); // simple API call
+    const response = await groq.models.list(); // Simple API call
     console.log("API Key is valid ✅");
   } catch (err) {
     console.error("API Key invalid ❌", err.message);
