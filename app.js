@@ -5,6 +5,7 @@ import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import connectDB from "./config/db.js";
+import errorMiddleware from "./middleware/errorMiddleware.js";
 
 import patientRoutes from "./routes/patients.js";
 import appointmentRoutes from "./routes/appointments.js";
@@ -24,7 +25,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || '*',
+  credentials: true,
+}));
 app.use(helmet()); // Security headers
 
 // Rate limiting
@@ -54,7 +58,7 @@ app.use("/api/entries", entryRoutes);
 app.use("/api/ai", aiRoutes);
 
 app.get("/", (req, res) => {
-  res.send("Server is running 🚀");
+  res.send("<h1>Server is running 🚀</h1>");
 });
 
 // Health check endpoint
@@ -63,16 +67,20 @@ app.get("/health", (req, res) => {
 });
 
 // Global Error Handler
-import errorMiddleware from "./middleware/errorMiddleware.js";
 app.use(errorMiddleware);
 
 // Connect DB and start server
 const startServer = async () => {
-  await connectDB();
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  try {
+    await connectDB();
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
 };
 
 startServer();

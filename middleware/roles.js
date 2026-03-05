@@ -1,16 +1,22 @@
 // Check if user is admin (also allows super-admin)
 export const isAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
   if (!['admin', 'super-admin'].includes(req.user.role)) {
     return res.status(403).json({ 
       success: false, 
       message: 'Access denied. Admin only.' 
     });
   }
-  next()
+  next();
 };
 
 // Check if user is doctor
 export const isDoctor = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
   if (req.user.role !== 'doctor') {
     return res.status(403).json({ 
       success: false, 
@@ -22,6 +28,9 @@ export const isDoctor = (req, res, next) => {
 
 // Check if user is receptionist
 export const isReceptionist = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
   if (req.user.role !== 'receptionist') {
     return res.status(403).json({ 
       success: false, 
@@ -33,6 +42,9 @@ export const isReceptionist = (req, res, next) => {
 
 // Check if user is patient
 export const isPatient = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
   if (req.user.role !== 'patient') {
     return res.status(403).json({ 
       success: false, 
@@ -44,6 +56,9 @@ export const isPatient = (req, res, next) => {
 
 // Check subscription plan
 export const hasProPlan = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
   if (req.user.subscriptionPlan !== 'pro') {
     return res.status(403).json({ 
       success: false, 

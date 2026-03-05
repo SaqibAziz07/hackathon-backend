@@ -22,6 +22,15 @@ const handleAIFallback = (res, fallbackData) => {
   });
 };
 
+// Safe JSON parse helper
+const safeParseAIResponse = (completion) => {
+  const rawContent = completion.choices[0]?.message?.content;
+  if (!rawContent) {
+    throw new Error("AI returned an empty response");
+  }
+  return JSON.parse(rawContent);
+};
+
 // Zod schemas for validation
 const symptomCheckerSchema = z.object({
   symptoms: z.string().min(5),
@@ -43,7 +52,7 @@ const riskFlaggingSchema = z.object({
 });
 
 // Smart Symptom Checker
-router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
+router.post("/symptom-checker", authMiddleware, async (req, res) => {
   try {
     const validated = symptomCheckerSchema.parse(req.body);
     const { symptoms, age, gender, medicalHistory, patientId } = validated;
@@ -88,7 +97,7 @@ router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
       response_format: { type: "json_object" }
     });
 
-    const aiResponse = JSON.parse(completion.choices[0]?.message?.content);
+    const aiResponse = safeParseAIResponse(completion);
 
     // Save diagnosis log if patientId is provided (assuming doctor is calling this)
     if (patientId && req.user.role === 'doctor') {
@@ -125,7 +134,7 @@ router.post("/symptom-checker", authMiddleware, async (req, res, next) => {
 });
 
 // Explain Prescription to Patient
-router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
+router.post("/explain-prescription", authMiddleware, async (req, res) => {
   try {
     const validated = explainPrescriptionSchema.parse(req.body);
     const { diagnosis, medicines, advice, language } = validated;
@@ -164,7 +173,7 @@ router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
     res.json({
       success: true,
       isFallback: false,
-      data: JSON.parse(completion.choices[0]?.message?.content)
+      data: safeParseAIResponse(completion)
     });
 
   } catch (error) {
@@ -172,8 +181,9 @@ router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Validation failed", errors: error.errors });
     }
     console.error("AI Explain Error:", error);
+    // Fixed: don't reference `diagnosis`/`advice` here — they may be out of scope if parse failed
     return handleAIFallback(res, {
-      simpleExplanation: `For ${diagnosis}, please take medicines as prescribed. ${advice}`,
+      simpleExplanation: "Please take medicines as prescribed and follow your doctor's advice.",
       lifestyleRecommendations: ["Follow doctor's direct advice"],
       preventiveAdvice: ["Standard precautionary measures apply"]
     });
@@ -181,7 +191,7 @@ router.post("/explain-prescription", authMiddleware, async (req, res, next) => {
 });
 
 // Risk Flagging & Predictive Analysis (Requires Pro Plan)
-router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next) => {
+router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res) => {
   try {
     const validated = riskFlaggingSchema.parse(req.body);
     const { patientHistory } = validated;
@@ -218,7 +228,7 @@ router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next)
     res.json({
       success: true,
       isFallback: false,
-      data: JSON.parse(completion.choices[0]?.message?.content)
+      data: safeParseAIResponse(completion)
     });
 
   } catch (error) {
@@ -235,9 +245,21 @@ router.post("/risk-flagging", authMiddleware, hasProPlan, async (req, res, next)
 });
 
 // Get AI Diagnosis History for a Patient
-router.get("/history/:patientId", authMiddleware, async (req, res, next) => {
+router.get("/history/:patientId", authMiddleware, async (req, res) => {
   try {
-    const history = await DiagnosisLog.find({ patientId: req.params.patientId })
+    const { patientId } = req.params;
+
+    // Validate patientId format
+    if (!patientId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ success: false, message: "Invalid patient ID format" });
+    }
+
+    // Authorization: patients can only view their own history
+    if (req.user.role === 'patient' && req.user.userId !== patientId) {
+      return res.status(403).json({ success: false, message: "Access denied. You can only view your own history." });
+    }
+
+    const history = await DiagnosisLog.find({ patientId })
       .sort({ createdAt: -1 })
       .limit(10);
       
